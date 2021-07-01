@@ -3,8 +3,8 @@ provider "aws" {
 }
 
 
-resource "aws_instance"{
-      ami           = "ami-0d296d66f22f256c2" # us-west-2
+resource "aws_instance" "myec2"{
+      ami           = "ami-0ab4d1e9cf9a1215a" # us-west-2
   instance_type = "t2.micro"
 
 }
