@@ -7,19 +7,92 @@ provider "aws" {
 module "vpc" {
   source = "terraform-aws-modules/vpc/aws"
 
-  name = "my-vpc"
-  cidr = "10.0.0.0/16"
+  name = var.vpc_name
+  cidr = var.cidr
 
-  azs             = ["us-east-1a", "us-east-1b"]
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
-  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
+  azs             = var.azs_list
+  private_subnets = var.private_subnets_list
+  public_subnets  = var.public_subnets_list
 
-  enable_nat_gateway = true
-  enable_vpn_gateway = true
+  enable_nat_gateway = var.enable_nat_gateway
+  enable_vpn_gateway = var.enable_vpn_gateway
 
   tags = {
     Terraform = "true"
-    Environment = "dev"
+    Environment = var.env
   }
 
 }
+
+/* Create the ELB Security Group */
+resource "aws_security_group" "elb_sg"{
+    name = var.cluster_name-elb
+
+    # Outbound rules
+    egress {
+        from_port =0
+        to_port =0
+        protocol ="-1"
+        cidr_block=var.everywhere_cidr
+    }
+
+    # Inbound rules
+    ingress{
+        from_port= var.elb_port
+        to_port = var.elb_port
+        protocol ="tcp"
+        cidr_block= var.everywhere_cidr
+    }
+}
+
+# Create an EC2 SG
+resource "aws_security_group" "ec2_sg"{
+     name = var.cluster_name-ec2-sg
+}
+
+# Create the sg rule and attach it to the elb sg
+resource "aws_security_group_rule" "sg_rule_elb" {
+  type                     = "ingress"
+  from_port                = var.server_port
+  to_port                  = var.server_port
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.elb_sg.id
+  security_group_id        = aws_security_group.ec2_sg.id
+}
+
+#Create the ELB
+resource "aws_elb" "elb" {
+  name = var.cluster_name-load-balancer
+  security_groups = [aws_security_group.elb_sg.id]
+  subnets =[module.vpc.public_subnets]
+  availability_zones= var.azs_list
+
+// Http listener
+  listener{
+      lb_port = var.elb_port
+      lb_protocol = "http"
+      instance_port = var.server_port
+      instance_protocol = "http"
+  }
+
+  // https listener
+  listener{
+      lb_port = 443
+      lb_protocol = "https"
+      instance_port = var.server_port
+      instance_protocol = "http"
+       ssl_certificate_id = "arn:aws:iam::123456789012:server-certificate/certName"
+  }
+
+  health_check {
+      healthy_threshold =2
+      unhealthy_threshold=2
+      timeout=3
+      interval =30
+      target = "HTTP:${var.server_port}"
+  }
+
+}
+
+
+
