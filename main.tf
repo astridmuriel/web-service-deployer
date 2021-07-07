@@ -48,7 +48,7 @@ resource "aws_security_group" "elb_sg" {
 # Create an EC2 SG
 resource "aws_security_group" "ec2_sg" {
   name = "${var.cluster_name}-ec2-sg"
-
+  vpc_id = module.vpc.vpc_id
     # Inbound rules
   ingress {
     from_port  = var.elb_port
