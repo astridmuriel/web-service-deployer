@@ -96,8 +96,7 @@ resource "aws_elb" "elb" {
 resource "aws_launch_configuration" "asg_lc"{
   image_id = var.image_id
   instance_type= var.instance_type
-  security_groups =[aws_security_group.ec2_sg]
-  subnets            =flatten([module.vpc.public_subnets])
+  security_groups =[aws_security_group.ec2_sg.id]
     user_data = <<-EOF
               #!/bin/bash
               echo "Hello, Terraform & AWS ASG" > index.html
@@ -113,7 +112,7 @@ resource "aws_launch_configuration" "asg_lc"{
 # Launch configuration
 resource "aws_autoscaling_group" "asg"{
    launch_configuration = aws_launch_configuration.asg_lc.id
-  availability_zones   = var.azs_list
+  vpc_zone_identifier = flatten([module.vpc.private_subnets])
   min_size = 2
   max_size = 5
 
