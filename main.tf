@@ -1,139 +1,275 @@
-provider "aws" {
-  region = var.region
+# /* Create VPC and Subnets from terraform aws module */
+# module "vpc" {
+#   source = "terraform-aws-modules/vpc/aws"
+
+#   name = var.vpc_name
+#   cidr = var.cidr
+
+#   azs             = var.azs_list
+#   private_subnets = var.private_subnets_list
+#   public_subnets  = var.public_subnets_list
+
+#   enable_nat_gateway = var.enable_nat_gateway
+#   enable_vpn_gateway = var.enable_vpn_gateway
+
+#   tags = {
+#     Terraform   = "true"
+#     Environment = var.env
+#   }
+
+# }
+
+terraform {
+  required_version = ">= 0.12, < 0.13"
+}
+provider "aws"{
+    region = var.region
 }
 
+resource "aws_launch_configuration" "example" {
+  image_id        = var.ami
+  instance_type   = var.instance_type
+  security_groups = [aws_security_group.instance.id]
 
-/* Create VPC and Subnets from terraform aws module */
-module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
+  user_data = data.template_file.user_data.rendered
 
-  name = var.vpc_name
-  cidr = var.cidr
-
-  azs             = var.azs_list
-  private_subnets = var.private_subnets_list
-  public_subnets  = var.public_subnets_list
-
-  enable_nat_gateway = var.enable_nat_gateway
-  enable_vpn_gateway = var.enable_vpn_gateway
-
-  tags = {
-    Terraform   = "true"
-    Environment = var.env
-  }
-
-}
-
-/* Create the ELB Security Group */
-resource "aws_security_group" "elb_sg" {
-  name = "${var.cluster_name}-elb"
-  vpc_id = module.vpc.vpc_id
-  # Outbound rules
-  egress {
-    from_port  = 0
-    to_port    = 0
-    protocol   = "-1"
-    cidr_blocks = var.everywhere_cidr
-  }
-
-  # Inbound rules
-  ingress {
-    from_port  = var.elb_port
-    to_port    = var.elb_port
-    protocol   = "tcp"
-    cidr_blocks = var.everywhere_cidr
+  # Required when using a launch configuration with an auto scaling group.
+  # https://www.terraform.io/docs/providers/aws/r/launch_configuration.html
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
-# Create an EC2 SG
-resource "aws_security_group" "ec2_sg" {
-  name = "${var.cluster_name}-ec2-sg"
-  vpc_id = module.vpc.vpc_id
+data "template_file" "user_data" {
+  template = file("${path.module}/user-data.sh")
 
-    egress {
-    from_port  = 0
-    to_port    = 0
-    protocol   = "-1"
-    cidr_blocks = var.everywhere_cidr
-  }
-
-    # Inbound rules
-  ingress {
-    from_port  = 22
-    to_port    = var.server_port
-    protocol   = "tcp"
-    security_groups    = [aws_security_group.elb_sg.id]
- #   cidr_blocks =["0.0.0.0/0"]
+  vars = {
+    server_port = var.server_port
+    db_address  = data.terraform_remote_state.db.outputs.address
+    db_port     = data.terraform_remote_state.db.outputs.port
+    server_text = var.server_text
   }
 }
 
-#Create the ELB
-resource "aws_elb" "elb" {
-  name               = "${var.cluster_name}-load-balancer"
-  security_groups    = [aws_security_group.elb_sg.id]
-  subnets            =flatten([module.vpc.public_subnets])
-  cross_zone_load_balancing = true
-  connection_draining =true
-  connection_draining_timeout =400
-//  availability_zones = var.azs_list
+resource "aws_autoscaling_group" "example" {
+  # Explicitly depend on the launch configuration's name so each time it's
+  # replaced, this ASG is also replaced
+  name = "${var.cluster_name}-${aws_launch_configuration.example.name}"
 
-  // Http listener
-  listener {
-    lb_port           = var.elb_port
-    lb_protocol       = "http"
-    instance_port     = var.server_port
-    instance_protocol = "http"
-  }
+  launch_configuration = aws_launch_configuration.example.name
+  vpc_zone_identifier  = data.aws_subnet_ids.default.ids
+  target_group_arns    = [aws_lb_target_group.asg.arn]
+  health_check_type    = "ELB"
 
-  # // https listener
-  # listener {
-  #   lb_port            = 443
-  #   lb_protocol        = "https"
-  #   instance_port      = var.server_port
-  #   instance_protocol  = "http"
-  #   ssl_certificate_id = "arn:aws:iam::123456789012:server-certificate/certName"
-  # }
+  min_size = var.min_size
+  max_size = var.max_size
 
-  health_check {
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    timeout             = 3
-    interval            = 30
-    target              = "HTTP:${var.server_port}/"
-  }
+  # Wait for at least this many instances to pass health checks before
+  # considering the ASG deployment complete
+  min_elb_capacity = var.min_size
 
-}
-
-# Simple launch configuration
-resource "aws_launch_configuration" "asg_lc"{
-  image_id = var.image_id
-  instance_type= var.instance_type
-  security_groups =[aws_security_group.ec2_sg.id]
-    user_data = <<-EOF
-              #!/bin/bash
-              echo "Hello, Terraform & AWS ASG" > index.html
-              nohup busybox httpd -f -p "${var.server_port}" &
-              EOF
+  # When replacing this ASG, create the replacement first, and only delete the
+  # original after
   lifecycle {
     create_before_destroy = true
   }
 
-}
-
-
-# Launch configuration
-resource "aws_autoscaling_group" "asg"{
-   launch_configuration = aws_launch_configuration.asg_lc.id
-  vpc_zone_identifier = flatten([module.vpc.private_subnets])
-  min_size = 2
-  max_size = 5
-
-  load_balancers    = [aws_elb.elb.name]
-  health_check_type = "ELB"
-
   tag {
     key                 = "Name"
-    value               = "terraform-asg-sample"
+    value               = var.cluster_name
     propagate_at_launch = true
   }
+
+  dynamic "tag" {
+    for_each = {
+      for key, value in var.custom_tags:
+      key => upper(value)
+      if key != "Name"
+    }
+
+    content {
+      key                 = tag.key
+      value               = tag.value
+      propagate_at_launch = true
+    }
+  }
 }
+
+resource "aws_autoscaling_schedule" "scale_out_during_business_hours" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  scheduled_action_name  = "${var.cluster_name}-scale-out-during-business-hours"
+  min_size               = 2
+  max_size               = 10
+  desired_capacity       = 10
+  recurrence             = "0 9 * * *"
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+resource "aws_autoscaling_schedule" "scale_in_at_night" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  scheduled_action_name  = "${var.cluster_name}-scale-in-at-night"
+  min_size               = 2
+  max_size               = 10
+  desired_capacity       = 2
+  recurrence             = "0 17 * * *"
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+resource "aws_security_group" "instance" {
+  name = "${var.cluster_name}-instance"
+}
+
+resource "aws_security_group_rule" "allow_server_http_inbound" {
+  type              = "ingress"
+  security_group_id = aws_security_group.instance.id
+
+  from_port   = var.server_port
+  to_port     = var.server_port
+  protocol    = local.tcp_protocol
+  cidr_blocks = local.all_ips
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnet_ids" "default" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+resource "aws_lb" "example" {
+  name               = var.cluster_name
+  load_balancer_type = "application"
+  subnets            = data.aws_subnet_ids.default.ids
+  security_groups    = [aws_security_group.alb.id]
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.example.arn
+  port              = local.http_port
+  protocol          = "HTTP"
+
+  # By default, return a simple 404 page
+  default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "404: page not found"
+      status_code  = 404
+    }
+  }
+}
+
+resource "aws_lb_target_group" "asg" {
+  name     = var.cluster_name
+  port     = var.server_port
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 15
+    timeout             = 3
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+}
+
+resource "aws_lb_listener_rule" "asg" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  condition {
+    path_pattern {
+      values = ["*"]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.asg.arn
+  }
+}
+
+resource "aws_security_group" "alb" {
+  name = "${var.cluster_name}-alb"
+}
+
+resource "aws_security_group_rule" "allow_http_inbound" {
+  type              = "ingress"
+  security_group_id = aws_security_group.alb.id
+
+  from_port   = local.http_port
+  to_port     = local.http_port
+  protocol    = local.tcp_protocol
+  cidr_blocks = local.all_ips
+}
+
+resource "aws_security_group_rule" "allow_all_outbound" {
+  type              = "egress"
+  security_group_id = aws_security_group.alb.id
+
+  from_port   = local.any_port
+  to_port     = local.any_port
+  protocol    = local.any_protocol
+  cidr_blocks = local.all_ips
+}
+
+data "terraform_remote_state" "db" {
+  backend = "s3"
+
+  config = {
+    bucket = var.db_remote_state_bucket
+    region = "us-east-1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "high_cpu_utilization" {
+  alarm_name  = "${var.cluster_name}-high-cpu-utilization"
+  namespace   = "AWS/EC2"
+  metric_name = "CPUUtilization"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.example.name
+  }
+
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  statistic           = "Average"
+  threshold           = 90
+  unit                = "Percent"
+}
+
+resource "aws_cloudwatch_metric_alarm" "low_cpu_credit_balance" {
+  count = format("%.1s", var.instance_type) == "t" ? 1 : 0
+
+  alarm_name  = "${var.cluster_name}-low-cpu-credit-balance"
+  namespace   = "AWS/EC2"
+  metric_name = "CPUCreditBalance"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.example.name
+  }
+
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  statistic           = "Minimum"
+  threshold           = 10
+  unit                = "Count"
+}
+
+locals {
+  http_port    = 80
+  any_port     = 0
+  any_protocol = "-1"
+  tcp_protocol = "tcp"
+  all_ips      = ["0.0.0.0/0"]
+}
+
