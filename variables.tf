@@ -1,47 +1,51 @@
 # Availability zones
-variable "azs_list"{
+variable "azs_list" {
+}
+
+# AWS Region
+variable "region" {
 
 }
 # list of private subnets
-variable "private_subnets_list"{
+variable "private_subnets_list" {
 
 }
 
 #list of public subnets
-variable "public_subnets_list"{
+variable "public_subnets_list" {
 
 }
 
 #Enable nat gateway
-variable "enable_nat_gateway"{
+variable "enable_nat_gateway" {
 
 }
 
-variable "enable_vpn_gateway"{
+variable "enable_vpn_gateway" {
 
 }
 
-variable "env"{
+variable "env" {
 
 }
 
-variable "elb_port"{
+variable "elb_port" {
 
 }
 variable "server_port" {
-  
-}
-
-variable "everywhere_cidr"{
-
-}
-variable "cluster_name"{
-
-}
-variable "cidr"{
 
 }
 
-variable "vpc_name"{
+variable "everywhere_cidr" {
+
+}
+variable "cluster_name" {
+
+}
+variable "cidr" {
+
+}
+
+variable "vpc_name" {
 
 }
