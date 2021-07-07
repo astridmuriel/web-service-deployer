@@ -96,7 +96,7 @@ resource "aws_elb" "elb" {
 resource "aws_launch_configuration" "asg_lc"{
   image_id = var.image_id
   instance_type= var.instance_type
-  security_groups =[aws_security_group.ec2_sg]
+  security_groups =[aws_security_group.ec2_sg.id]
     user_data = <<-EOF
               #!/bin/bash
               echo "Hello, Terraform & AWS ASG" > index.html
