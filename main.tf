@@ -48,17 +48,17 @@ resource "aws_security_group" "elb_sg" {
 # Create an EC2 SG
 resource "aws_security_group" "ec2_sg" {
   name = "${var.cluster_name}-ec2-sg"
+
+    # Inbound rules
+  ingress {
+    from_port  = var.elb_port
+    to_port    = var.elb_port
+    protocol   = "tcp"
+     security_groups    = [aws_security_group.elb_sg.id]
+  }
 }
 
-# Create the sg rule and attach it to the elb sg
-resource "aws_security_group_rule" "sg_rule_elb" {
-  type                     = "ingress"
-  from_port                = var.server_port
-  to_port                  = var.server_port
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.elb_sg.id
-  security_group_id        = aws_security_group.ec2_sg.id
-}
+
 
 #Create the ELB
 resource "aws_elb" "elb" {
