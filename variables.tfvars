@@ -11,3 +11,5 @@ vpc_name             = "my-vpc"
 elb_port             = 80
 server_port          = 8080
 everywhere_cidr      = ["0.0.0.0/0"]
+image_id=ami-0ab4d1e9cf9a1215a
+instance_type=t2.micro

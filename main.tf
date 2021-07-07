@@ -58,8 +58,6 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
-
-
 #Create the ELB
 resource "aws_elb" "elb" {
   name               = "${var.cluster_name}-load-balancer"
@@ -94,3 +92,36 @@ resource "aws_elb" "elb" {
 
 }
 
+# Simple launch configuration
+resource "aws_launch_configuration" "asg_lc"{
+  image_id = var.image_id
+  instance_type= var.instance_type
+  security_groups =[aws_security_group.ec2_sg]
+    user_data = <<-EOF
+              #!/bin/bash
+              echo "Hello, Terraform & AWS ASG" > index.html
+              nohup busybox httpd -f -p "${var.server_port}" &
+              EOF
+  lifecycle {
+    create_before_destroy = true
+  }
+
+}
+
+
+# Launch configuration
+resource "aws_autoscaling_group" "asg"{
+   launch_configuration = aws_launch_configuration.asg_lc.id
+  availability_zones   = var.azs_list
+  min_size = 2
+  max_size = 5
+
+  load_balancers    = [aws_elb.elb.name]
+  health_check_type = "ELB"
+
+  tag {
+    key                 = "Name"
+    value               = "terraform-asg-sample"
+    propagate_at_launch = true
+  }
+}
