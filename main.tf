@@ -19,12 +19,21 @@
 
 # }
 
-terraform {
-  required_version = ">= 0.12, < 0.13"
-}
+
 provider "aws"{
-    region = var.region
+      region = var.region
 }
+terraform {
+   
+    backend "s3" {
+     bucket= "terraform-bucket-astrid"
+     key="terraform.tfstate"
+     region="us-east-1"
+
+  }
+}
+
+
 
 resource "aws_launch_configuration" "example" {
   image_id        = var.ami
@@ -45,8 +54,8 @@ data "template_file" "user_data" {
 
   vars = {
     server_port = var.server_port
-    db_address  = data.terraform_remote_state.db.outputs.address
-    db_port     = data.terraform_remote_state.db.outputs.port
+#    db_address  = data.terraform_remote_state.db.outputs.address
+ #   db_port     = data.terraform_remote_state.db.outputs.port
     server_text = var.server_text
   }
 }
@@ -220,14 +229,6 @@ resource "aws_security_group_rule" "allow_all_outbound" {
   cidr_blocks = local.all_ips
 }
 
-data "terraform_remote_state" "db" {
-  backend = "s3"
-
-  config = {
-    bucket = var.db_remote_state_bucket
-    region = "us-east-1"
-  }
-}
 
 resource "aws_cloudwatch_metric_alarm" "high_cpu_utilization" {
   alarm_name  = "${var.cluster_name}-high-cpu-utilization"

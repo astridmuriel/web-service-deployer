@@ -23,4 +23,4 @@ instance_type="t2.micro"
 min_size=2
 max_size=4
 enable_autoscaling = true
-db_remote_state_bucket=terraform-bucket-astrid
+db_remote_state_bucket="terraform-bucket-astrid"
