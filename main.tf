@@ -49,13 +49,21 @@ resource "aws_security_group" "elb_sg" {
 resource "aws_security_group" "ec2_sg" {
   name = "${var.cluster_name}-ec2-sg"
   vpc_id = module.vpc.vpc_id
+
+    egress {
+    from_port  = 0
+    to_port    = 0
+    protocol   = "-1"
+    cidr_blocks = var.everywhere_cidr
+  }
+
     # Inbound rules
   ingress {
-    from_port  = var.server_port
+    from_port  = 22
     to_port    = var.server_port
     protocol   = "tcp"
- #   security_groups    = [aws_security_group.elb_sg.id]
-    cidr_blocks =["0.0.0.0/10"]
+    security_groups    = [aws_security_group.elb_sg.id]
+ #   cidr_blocks =["0.0.0.0/0"]
   }
 }
 
@@ -64,6 +72,9 @@ resource "aws_elb" "elb" {
   name               = "${var.cluster_name}-load-balancer"
   security_groups    = [aws_security_group.elb_sg.id]
   subnets            =flatten([module.vpc.public_subnets])
+  cross_zone_load_balancing = true
+  connection_draining =true
+  connection_draining_timeout =400
 //  availability_zones = var.azs_list
 
   // Http listener
